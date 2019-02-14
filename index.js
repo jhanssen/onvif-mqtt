@@ -65,8 +65,6 @@ function captureImage(camera, subtopic) {
             }).catch(err => {
                 console.error("failed to resize", err);
             });
-        // publish
-
     }).catch(err => {
         console.error("streaming error", err);
     });
@@ -129,8 +127,6 @@ setInterval(() => {
         if (camera.device) {
             console.log("requesting image");
             captureImage(camera, "live");
-        } else {
-            console.log("no device for camera", camera);
         }
     });
 }, interval);
