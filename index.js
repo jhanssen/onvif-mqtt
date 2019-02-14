@@ -85,13 +85,9 @@ setInterval(() => {
                     }).catch(err => {
                         console.error("failed to resize", err);
                     });
-                // publish
-
             }).catch(err => {
                 console.error("streaming error", err);
             });
-        } else {
-            console.log("no device for camera", camera);
         }
     });
 }, interval);
