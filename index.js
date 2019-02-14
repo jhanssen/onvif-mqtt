@@ -26,6 +26,9 @@ const mqtttopic = options("mqtt-topic", "/security/camera/");
 
 const interval = options.int("publish-interval", 10000);
 
+const width = options.int("resize-width", 320);
+const height = options.int("resize-height", 200);
+
 let mqttauth = "";
 if (mqttuser || mqttpasswd) {
     if (!mqttuser || !mqttpasswd) {
@@ -70,7 +73,7 @@ setInterval(() => {
                 //console.log("streaming", data.body.length, data.headers, typeof data.body);
 
                 sharp(data.body)
-                    .resize(320, 240)
+                    .resize(width, height)
                     //.toFormat("jpeg")
                     .toBuffer()
                     .then(resized => {
