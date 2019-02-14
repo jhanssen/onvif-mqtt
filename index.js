@@ -4,6 +4,7 @@ const onvif = require("node-onvif");
 const request = require("request-promise-native");
 const sharp = require("sharp");
 const url = require("url");
+const WebSocket = require("ws");
 
 const cameras = options("cameras");
 if (typeof cameras !== "object" || !(cameras instanceof Array)) {
@@ -22,12 +23,78 @@ if (!mqtthost || !mqttport) {
 const mqttuser = options("mqtt-user");
 const mqttpasswd = options("mqtt-password");
 
-const mqtttopic = options("mqtt-topic", "/security/camera/");
+function append(str, sub)
+{
+    if (str.substr(sub.length * -1) === sub)
+        return str;
+    return str + sub;
+}
+
+const mqtttopic = append(options("mqtt-topic", "/security/camera/"), "/");
 
 const interval = options.int("publish-interval", 10000);
 
 const width = options.int("resize-width", 320);
 const height = options.int("resize-height", 200);
+
+const listenPort = options.int("listen-port", 0);
+const listenHost = options("listen-host", "localhost");
+
+function captureImage(camera, subtopic) {
+    const u = url.parse(camera.xaddr);
+    let a = u.auth;
+    if (!a) {
+        if (camera.user && camera.pass) {
+            a = `${camera.user}:${camera.pass}`;
+        }
+    }
+    const nu = url.format({ protocol: u.protocol, auth: a, host: u.host });
+    request({ url: `${nu}/Streaming/channels/1/picture`, method: "GET", resolveWithFullResponse: true, encoding: null }).then(data => {
+        //console.log("streaming", data.body.length, data.headers, typeof data.body);
+
+        sharp(data.body)
+            .resize(width, height)
+            //.toFormat("jpeg")
+            .toBuffer()
+            .then(resized => {
+                //console.log("resized", resized.length);
+
+                const topic = append(mqtttopic + (camera.name || u.host), "/") + subtopic;
+                console.log("publishing to", topic);
+                mqttclient.publish(topic, resized);
+            }).catch(err => {
+                console.error("failed to resize", err);
+            });
+        // publish
+
+    }).catch(err => {
+        console.error("streaming error", err);
+    });
+}
+
+if (listenPort > 0) {
+    console.log(`listening on ${listenHost}:${listenPort}`);
+    const wss = new WebSocket.Server({ port: listenPort, host: listenHost });
+    wss.on('connection', function connection(ws) {
+        ws.on('message', function incoming(message) {
+            try {
+                const msg = JSON.parse(message);
+                if (typeof msg === "object" && "type" in msg && "camera" in msg) {
+                    cameras.forEach(camera => {
+                        if (camera.device && camera.name == msg.camera) {
+                            captureImage(camera, msg.type);
+                        }
+                    });
+                } else {
+                    console.error("invalid message", msg);
+                }
+            } catch (e) {
+                console.error("unable to parse json", message);
+            }
+            ws.close();
+        });
+    });
+}
 
 let mqttauth = "";
 if (mqttuser || mqttpasswd) {
@@ -61,35 +128,7 @@ setInterval(() => {
     cameras.forEach(camera => {
         if (camera.device) {
             console.log("requesting image");
-            const u = url.parse(camera.xaddr);
-            let a = u.auth;
-            if (!a) {
-                if (camera.user && camera.pass) {
-                    a = `${camera.user}:${camera.pass}`;
-                }
-            }
-            const nu = url.format({ protocol: u.protocol, auth: a, host: u.host });
-            request({ url: `${nu}/Streaming/channels/1/picture`, method: "GET", resolveWithFullResponse: true, encoding: null }).then(data => {
-                //console.log("streaming", data.body.length, data.headers, typeof data.body);
-
-                sharp(data.body)
-                    .resize(width, height)
-                    //.toFormat("jpeg")
-                    .toBuffer()
-                    .then(resized => {
-                        //console.log("resized", resized.length);
-
-                        const topic = mqtttopic + (camera.name || u.host);
-                        console.log("publishing to", topic);
-                        mqttclient.publish(topic, resized);
-                    }).catch(err => {
-                        console.error("failed to resize", err);
-                    });
-                // publish
-
-            }).catch(err => {
-                console.error("streaming error", err);
-            });
+            captureImage(camera, "live");
         } else {
             console.log("no device for camera", camera);
         }
